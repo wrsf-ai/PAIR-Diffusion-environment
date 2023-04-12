@@ -119,7 +119,7 @@ class ImageComp:
         self.baseoutput = output.astype(np.uint8)
         return self.baseoutput
 
-    def process_mask(self, mask, panoptic_mask, segmask):
+    def _process_mask(self, mask, panoptic_mask, segmask):
         panoptic_mask_ = panoptic_mask + 1
         mask_ = resize_image(mask['mask'][:, :, 0], min(panoptic_mask.shape))
         mask_ = torch.tensor(mask_)
@@ -137,29 +137,29 @@ class ImageComp:
         return final_mask, obj_class
     
     
-    def edit_app(self, input_mask, ref_mask, whole_ref):
+    def _edit_app(self, input_mask, ref_mask, whole_ref):
         input_pmask = self.input_pmask
         input_segmask = self.input_segmask
 
         if whole_ref:
             reference_mask = torch.ones(self.ref_pmask.shape).cuda()
         else:
-            reference_mask, _ = self.process_mask(ref_mask, self.ref_pmask, self.ref_segmask)
+            reference_mask, _ = self._process_mask(ref_mask, self.ref_pmask, self.ref_segmask)
 
-        edit_mask, _ = self.process_mask(input_mask, self.input_pmask, self.input_segmask)
+        edit_mask, _ = self._process_mask(input_mask, self.input_pmask, self.input_segmask)
         ma = torch.max(input_pmask)
         input_pmask[edit_mask == 1] = ma + 1
         return reference_mask, input_pmask, input_segmask, edit_mask, ma
 
     
-    def edit(self, input_mask, ref_mask, whole_ref=False, inter=1):
+    def _edit(self, input_mask, ref_mask, whole_ref=False, inter=1):
         input_img = (self.input_img/127.5 - 1)
         input_img =  torch.from_numpy(input_img.astype(np.float32)).cuda().unsqueeze(0).permute(0,3,1,2)
 
         reference_img = (self.ref_img/127.5 - 1)
         reference_img =  torch.from_numpy(reference_img.astype(np.float32)).cuda().unsqueeze(0).permute(0,3,1,2)
 
-        reference_mask, input_pmask, input_segmask, region_mask, ma = self.edit_app(input_mask, ref_mask, whole_ref)     
+        reference_mask, input_pmask, input_segmask, region_mask, ma = self._edit_app(input_mask, ref_mask, whole_ref)     
 
         input_pmask = input_pmask.float().cuda().unsqueeze(0).unsqueeze(1)
         _, mean_feat_inpt, one_hot_inpt, empty_mask_flag_inpt = model.get_appearance(input_img, input_pmask, return_all=True)
@@ -182,7 +182,7 @@ class ImageComp:
     def process(self, input_mask, ref_mask, prompt, a_prompt, n_prompt, 
                 num_samples, ddim_steps, guess_mode, strength, 
                 scale_s, scale_f, scale_t, seed, eta, masking=True,whole_ref=False,inter=1):
-        structure, appearance, mask, img = self.edit(input_mask, ref_mask,
+        structure, appearance, mask, img = self._edit(input_mask, ref_mask,
                                                      whole_ref=whole_ref, inter=inter)
 
         null_structure = torch.zeros(structure.shape).cuda() - 1
@@ -242,6 +242,17 @@ class ImageComp:
         return [] + results    
 
 
+def init_input_canvas_wrapper(obj, *args):
+    return obj.init_input_canvas(*args)
+
+def init_ref_canvas_wrapper(obj, *args):
+    return obj.init_ref_canvas(*args)
+
+def process_wrapper(obj, *args):
+    return obj.process(*args)
+
+
+
 css = """
      h1 {
   text-align: center;
@@ -293,14 +304,14 @@ def create_app_demo():
             """)
     with gr.Column():
         with gr.Row():
-            img_edit = ImageComp('edit_app')
+            img_edit = gr.State(ImageComp('edit_app'))
             with gr.Column():
                 btn1 = gr.Button("Input Image")
                 input_image = gr.Image(source='upload', label='Input Image', type="numpy",)
             with gr.Column():
                 btn2 = gr.Button("Select Object to Edit")
                 input_mask = gr.Image(source="upload",  label='Select Object in Input Image', type="numpy", tool="sketch")
-            input_image.change(fn=img_edit.init_input_canvas, inputs=[input_image], outputs=[input_mask],  queue=False)
+            input_image.change(fn=init_input_canvas_wrapper, inputs=[img_edit, input_image], outputs=[input_mask],  queue=False)
             
         # with gr.Row():
             with gr.Column():
@@ -310,7 +321,7 @@ def create_app_demo():
                 btn4 = gr.Button("Select Reference Object")
                 reference_mask = gr.Image(source="upload",  label='Select Object in Refernce Image', type="numpy", tool="sketch")
 
-            ref_img.change(fn=img_edit.init_ref_canvas, inputs=[ref_img], outputs=[reference_mask],  queue=False)
+            ref_img.change(fn=init_ref_canvas_wrapper, inputs=[img_edit, ref_img], outputs=[reference_mask],  queue=False)
     
         with gr.Row():
             prompt = gr.Textbox(label="Prompt", value='A picture of truck')
@@ -325,7 +336,6 @@ def create_app_demo():
         
         with gr.Accordion("Advanced options", open=False):
             num_samples = gr.Slider(label="Images", minimum=1, maximum=12, value=1, step=1)
-            image_resolution = gr.Slider(label="Image Resolution", minimum=512, maximum=512, value=512, step=64)
             strength = gr.Slider(label="Control Strength", minimum=0.0, maximum=2.0, value=1.0, step=0.01)
             guess_mode = gr.Checkbox(label='Guess Mode', value=False)
             ddim_steps = gr.Slider(label="Steps", minimum=1, maximum=100, value=20, step=1)
@@ -351,7 +361,7 @@ def create_app_demo():
             )
     ips = [input_mask, reference_mask, prompt, a_prompt, n_prompt, num_samples, ddim_steps, guess_mode, strength, 
                 scale_s, scale_f, scale_t, seed, eta, masking, whole_ref, interpolation]
-    run_button.click(fn=img_edit.process, inputs=ips, outputs=[result_gallery])
+    run_button.click(fn=process_wrapper, inputs=[img_edit, *ips], outputs=[result_gallery])
 
 
 
