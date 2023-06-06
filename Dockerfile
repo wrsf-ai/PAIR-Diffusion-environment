@@ -33,7 +33,7 @@ RUN chown -R user:user $WORKDIR
 RUN chmod -R 777 $WORKDIR
 
 USER user
-RUN git clone https://huggingface.co/spaces/PAIR/PAIR-Diffusion $WORKDIR
+RUN git clone https://github.com/wrsf-ai/PAIR-Diffusion-environment.git $WORKDIR
 RUN pip install --no-cache-dir --upgrade -r $WORKDIR/requirements.txt
 RUN pip install ninja
 
